@@ -1,0 +1,170 @@
+
+/* =================================
+   GLORY E-COMMERCE REGISTRATION PAGE
+================================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: linear-gradient(135deg, #f0f4ff, #e5ecff);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 25px 15px;
+    color: #1e293b;
+}
+
+/* Registration Container */
+
+.register-container {
+    width: 100%;
+    max-width: 480px;
+    background: #ffffff;
+    padding: 40px 35px;
+    border-radius: 16px;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.08);
+}
+
+/* Heading */
+
+.register-container h1 {
+    text-align: center;
+    color: #1e3a8a;
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.register-container .subtitle {
+    text-align: center;
+    color: #64748b;
+    font-size: 14px;
+    margin-bottom: 28px;
+}
+
+/* Form Layout */
+
+.register-container form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 8px;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 14px 15px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    font-size: 15px;
+    color: #1e293b;
+    background: #f8fafc;
+    outline: none;
+    transition: 0.3s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    border-color: #2563eb;
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* Submit Button */
+
+.register-container button,
+.register-container input[type="submit"] {
+    width: 100%;
+    padding: 14px;
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+    border-radius: 9px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.3s ease;
+    margin-top: 5px;
+}
+
+.register-container button:hover,
+.register-container input[type="submit"]:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+/* Error Message */
+
+.error-message {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 18px;
+    text-align: center;
+}
+
+/* Success Message */
+
+.success-message {
+    background: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 18px;
+    text-align: center;
+}
+
+/* Login Link */
+
+.register-container .login-link {
+    text-align: center;
+    font-size: 14px;
+    margin-top: 22px;
+    color: #64748b;
+}
+
+.register-container .login-link a {
+    color: #2563eb;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.register-container .login-link a:hover {
+    text-decoration: underline;
+}
+
+/* Mobile Responsiveness */
+
+@media (max-width: 480px) {
+    .register-container {
+        padding: 30px 22px;
+        border-radius: 12px;
+    }
+
+    .register-container h1 {
+        font-size: 24px;
+    }
+}
