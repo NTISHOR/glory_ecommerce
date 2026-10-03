@@ -83,6 +83,7 @@ $city = trim($customer['city'] ?? '');
 $state = trim($customer['state'] ?? '');
 $country = trim($customer['country'] ?? '');
 $customer_note = '';
+$payment_method = 'pay_on_delivery';
 
 /*
 |--------------------------------------------------------------------------
@@ -124,12 +125,12 @@ function getCheckoutCart(PDO $pdo): array
         }
 
         if (
-            $product['status'] !== 'active' ||
-            (int) $product['stock'] <= 0
-        ) {
-            unset($_SESSION['cart'][$product_id]);
-            continue;
-        }
+    $product['status'] !== 'approved' ||
+    (int) $product['stock'] <= 0
+) {
+    unset($_SESSION['cart'][$product_id]);
+    continue;
+}
 
         $quantity = (int) ($cart_item['quantity'] ?? 1);
 
@@ -224,11 +225,23 @@ $grand_total = $subtotal + $delivery_fee - $discount;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $delivery_address = trim($_POST['delivery_address'] ?? '');
-    $city = trim($_POST['city'] ?? '');
-    $state = trim($_POST['state'] ?? '');
-    $country = trim($_POST['country'] ?? '');
-    $customer_note = trim($_POST['customer_note'] ?? '');
+   $delivery_address = trim($_POST['delivery_address'] ?? '');
+$city = trim($_POST['city'] ?? '');
+$state = trim($_POST['state'] ?? '');
+$country = trim($_POST['country'] ?? '');
+$customer_note = trim($_POST['customer_note'] ?? '');
+
+$payment_method = $_POST['payment_method'] ?? '';
+
+$allowed_payment_methods = [
+    'pay_on_delivery',
+    'bank_transfer',
+    'card'
+];
+
+if (!in_array($payment_method, $allowed_payment_methods, true)) {
+    $payment_method = '';
+}
 
     /*
     |--------------------------------------------------------------------------
@@ -311,7 +324,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 }
 
-                if ($product['status'] !== 'active') {
+                if ($product['status'] !== 'approved') {
                     throw new Exception(
                         $product['name']
                         . " is no longer available."
@@ -401,38 +414,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             |--------------------------------------------------------------------------
             */
 
-            $stmt = $pdo->prepare("
-                INSERT INTO orders (
-                    order_number,
-                    customer_id,
-                    subtotal,
-                    delivery_fee,
-                    discount,
-                    total_amount,
-                    payment_status,
-                    order_status,
-                    delivery_address,
-                    customer_note
-                )
-                VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-            ");
+           $stmt = $pdo->prepare("
+    INSERT INTO orders (
+        order_number,
+        customer_id,
+        subtotal,
+        delivery_fee,
+        discount,
+        total_amount,
+        payment_method,
+        payment_status,
+        order_status,
+        delivery_address,
+        customer_note
+    )
+    VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+");
 
-            $stmt->execute([
-                $order_number,
-                $customer_id,
-                $subtotal,
-                $delivery_fee,
-                $discount,
-                $grand_total,
-                'pending',
-                'pending',
-                $full_delivery_address,
-                $customer_note !== ''
-                    ? $customer_note
-                    : null
-            ]);
+$stmt->execute([
+    $order_number,
+    $customer_id,
+    $subtotal,
+    $delivery_fee,
+    $discount,
+    $grand_total,
+    $payment_method,
+    'pending',
+    'pending',
+    $full_delivery_address,
+    $customer_note !== ''
+        ? $customer_note
+        : null
+]);
 
             $order_id = (int) $pdo->lastInsertId();
 
@@ -871,6 +886,109 @@ foreach ($cart_items as $item) {
 
                         </div>
 
+                        
+<!-- PAYMENT METHOD -->
+
+<div class="checkout-form-group payment-method-section">
+
+    <label>
+        <i class="fas fa-wallet"></i>
+        Payment Method
+        <span>*</span>
+    </label>
+
+    <p class="payment-description">
+        Select how you would like to pay for your order.
+    </p>
+
+    <div class="payment-method-options">
+
+        <label class="payment-option">
+
+            <input
+                type="radio"
+                name="payment_method"
+                value="pay_on_delivery"
+                <?= $payment_method === 'pay_on_delivery' ? 'checked' : '' ?>
+                required
+            >
+
+            <div class="payment-option-content">
+
+                <i class="fas fa-truck"></i>
+
+                <div>
+                    <strong>Pay on Delivery</strong>
+
+                    <p>
+                        Pay cash when your order arrives at your doorstep.
+                    </p>
+                </div>
+
+            </div>
+
+        </label>
+
+
+        <label class="payment-option">
+
+            <input
+                type="radio"
+                name="payment_method"
+                value="bank_transfer"
+                <?= $payment_method === 'bank_transfer' ? 'checked' : '' ?>
+                required
+            >
+
+            <div class="payment-option-content">
+
+                <i class="fas fa-building-columns"></i>
+
+                <div>
+                    <strong>Bank Transfer</strong>
+
+                    <p>
+                        Pay by bank transfer. Payment verification instructions
+                        will be provided after placing your order.
+                    </p>
+                </div>
+
+            </div>
+
+        </label>
+
+
+        <label class="payment-option">
+
+            <input
+                type="radio"
+                name="payment_method"
+                value="card"
+                <?= $payment_method === 'card' ? 'checked' : '' ?>
+                required
+            >
+
+            <div class="payment-option-content">
+
+                <i class="fas fa-credit-card"></i>
+
+                <div>
+                    <strong>Card Payment</strong>
+
+                    <p>
+                        Pay securely using your debit or credit card.
+                        Payment gateway integration is coming soon.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </label>
+
+    </div>
+
+</div>
 
                         <div class="checkout-form-actions">
 

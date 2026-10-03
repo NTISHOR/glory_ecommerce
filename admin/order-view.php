@@ -6,6 +6,10 @@ require_once 'admin_activity.php';
 
 $pdo = getDbConnection();
 
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 // Ensure only Super Admin can access this page
 if (
     !isset($_SESSION['user_id']) ||
@@ -43,6 +47,17 @@ $error_message = '';
 
 // Handle order status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    // Validate CSRF token before processing any changes
+    if (
+        empty($_POST['csrf_token']) ||
+        !hash_equals(
+            $_SESSION['csrf_token'],
+            $_POST['csrf_token']
+        )
+    ) {
+        die('Invalid security token. Please refresh the page and try again.');
+    }
 
     $new_status = $_POST['order_status'] ?? '';
 
@@ -84,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $stmt->execute([$new_status, $order_id]);
 
+                
                 // Record activity
                 logAdminActivity(
                     $pdo,
@@ -105,15 +121,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Fetch order and customer details
 $stmt = $pdo->prepare("
-    SELECT
-        o.*,
-        u.full_name AS customer_name,
-        u.email AS customer_email,
-        u.phone AS customer_phone
-    FROM orders o
-    INNER JOIN users u ON o.customer_id = u.id
-    WHERE o.id = ?
-    LIMIT 1
+SELECT
+    o.*,
+    u.full_name AS customer_name,
+    u.email AS customer_email,
+    u.phone AS customer_phone,
+
+    verifier.full_name AS payment_verifier_name,
+
+    refunder.full_name AS refund_by_name
+
+FROM orders o
+
+INNER JOIN users u
+    ON o.customer_id = u.id
+
+LEFT JOIN users verifier
+    ON verifier.id = o.payment_verified_by
+
+LEFT JOIN users refunder
+    ON refunder.id = o.refunded_by
+
+WHERE o.id = ?
+
+LIMIT 1
 ");
 
 $stmt->execute([$order_id]);
@@ -147,6 +178,47 @@ $stmt = $pdo->prepare("
 $stmt->execute([$order_id]);
 
 $order_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* =========================================
+   FETCH VENDOR CONFIRMATIONS
+========================================= */
+
+$stmt = $pdo->prepare("
+    SELECT
+        oi.vendor_id,
+        COALESCE(
+            vp.store_name,
+            u.full_name,
+            'Unknown Vendor'
+        ) AS vendor_name,
+        voc.confirmed_at
+
+    FROM order_items oi
+
+    LEFT JOIN users u
+        ON u.id = oi.vendor_id
+
+    LEFT JOIN vendor_profiles vp
+        ON vp.user_id = oi.vendor_id
+
+    LEFT JOIN vendor_order_confirmations voc
+        ON voc.order_id = oi.order_id
+        AND voc.vendor_id = oi.vendor_id
+
+    WHERE oi.order_id = ?
+
+    GROUP BY
+        oi.vendor_id,
+        vp.store_name,
+        u.full_name,
+        voc.confirmed_at
+
+    ORDER BY vendor_name ASC
+");
+
+$stmt->execute([$order_id]);
+
+$vendor_confirmations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Calculate item quantity
 $total_items = 0;
@@ -350,7 +422,118 @@ function formatStatus($status): string
 
         </section>
 
-        
+
+<!-- Vendor Confirmation Tracking -->
+<section class="table-panel">
+
+    <div class="panel-header">
+        <div>
+            <h2>
+                <i class="fas fa-store"></i>
+                Vendor Confirmations
+            </h2>
+
+            <p>
+                Track which vendors have acknowledged this order.
+            </p>
+        </div>
+    </div>
+
+    <div class="table-wrapper">
+
+        <table class="orders-table">
+
+            <thead>
+                <tr>
+                    <th>Vendor</th>
+                    <th>Confirmation Status</th>
+                    <th>Confirmation Date</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                <?php if (empty($vendor_confirmations)): ?>
+
+                    <tr>
+                        <td colspan="3" class="empty-state">
+                            No vendor confirmations found.
+                        </td>
+                    </tr>
+
+                <?php else: ?>
+
+                    <?php foreach (
+                        $vendor_confirmations as $confirmation
+                    ): ?>
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    <?= htmlspecialchars(
+                                        $confirmation['vendor_name']
+                                    ) ?>
+                                </strong>
+                            </td>
+
+                            <td>
+
+                                <?php if (
+                                    !empty($confirmation['confirmed_at'])
+                                ): ?>
+
+                                    <span class="status-badge order-confirmed">
+                                        <i class="fas fa-check-circle"></i>
+                                        Confirmed
+                                    </span>
+
+                                <?php else: ?>
+
+                                    <span class="status-badge order-pending">
+                                        <i class="fas fa-clock"></i>
+                                        Awaiting Confirmation
+                                    </span>
+
+                                <?php endif; ?>
+
+                            </td>
+
+                            <td>
+
+                                <?php if (
+                                    !empty($confirmation['confirmed_at'])
+                                ): ?>
+
+                                    <?= date(
+                                        'M d, Y h:i A',
+                                        strtotime(
+                                            $confirmation['confirmed_at']
+                                        )
+                                    ) ?>
+
+                                <?php else: ?>
+
+                                    <span>Not confirmed</span>
+
+                                <?php endif; ?>
+
+                            </td>
+
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                <?php endif; ?>
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</section>
+
 <!-- Order Status Management -->
 <section class="table-panel">
 
@@ -378,8 +561,12 @@ function formatStatus($status): string
             </div>
         <?php endif; ?>
 
-        <form method="POST" class="order-status-form">
-
+        <form method="POST" class="order-status-form" >
+<input
+    type="hidden"
+    name="csrf_token"
+    value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>"
+>
             <div class="form-group">
                 <label for="order_status">Order Status</label>
 
@@ -591,7 +778,93 @@ function formatStatus($status): string
                     </span>
                 </div>
 
+                <div class="summary-row">
+    <span>Payment Method</span>
+    <strong>
+        <?= htmlspecialchars(formatStatus($order['payment_method'])) ?>
+    </strong>
+</div>
+
+<?php if (!empty($order['payment_verified_at'])): ?>
+
+    <div class="summary-row">
+        <span>Verified By</span>
+        <strong>
+            <?= htmlspecialchars(
+                $order['payment_verifier_name'] ?? 'Admin'
+            ) ?>
+        </strong>
+    </div>
+
+    <div class="summary-row">
+        <span>Verified At</span>
+        <strong>
+            <?= date(
+                'M d, Y h:i A',
+                strtotime($order['payment_verified_at'])
+            ) ?>
+        </strong>
+    </div>
+
+<?php endif; ?>
+
             </div>
+
+            <?php if (!empty($order['refunded_at'])): ?>
+
+    <div class="summary-row">
+        <span>Refunded By</span>
+        <strong>
+            <?= htmlspecialchars($order['refund_by_name'] ?? 'Admin') ?>
+        </strong>
+    </div>
+
+    <div class="summary-row">
+        <span>Refunded At</span>
+        <strong>
+            <?= date(
+                'M d, Y h:i A',
+                strtotime($order['refunded_at'])
+            ) ?>
+        </strong>
+    </div>
+
+    <div class="summary-row">
+        <span>Refund Reason</span>
+        <strong>
+            <?= htmlspecialchars($order['refund_reason'] ?? '—') ?>
+        </strong>
+    </div>
+
+<?php endif; ?>
+
+            <?php if (!empty($order['refunded_at'])): ?>
+
+    <div class="summary-row">
+        <span>Refunded By</span>
+        <strong>
+            <?= htmlspecialchars($order['refund_by_name'] ?? 'Admin') ?>
+        </strong>
+    </div>
+
+    <div class="summary-row">
+        <span>Refunded At</span>
+        <strong>
+            <?= date(
+                'M d, Y h:i A',
+                strtotime($order['refunded_at'])
+            ) ?>
+        </strong>
+    </div>
+
+    <div class="summary-row">
+        <span>Refund Reason</span>
+        <strong>
+            <?= htmlspecialchars($order['refund_reason'] ?? '—') ?>
+        </strong>
+    </div>
+
+<?php endif; ?>
 
         </section>
 

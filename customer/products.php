@@ -65,7 +65,8 @@ $sql = "
         p.status,
         c.name AS category_name,
         u.full_name AS vendor_name,
-        vp.store_name
+vp.store_name,
+vp.store_slug
     FROM products p
     LEFT JOIN categories c
         ON p.category_id = c.id
@@ -73,7 +74,7 @@ $sql = "
         ON p.vendor_id = u.id
     LEFT JOIN vendor_profiles vp
         ON vp.user_id = p.vendor_id
-    WHERE p.status = 'active'
+    WHERE p.status = 'approved'
 ";
 
 $params = [];
@@ -287,15 +288,33 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <?= htmlspecialchars($product['name']) ?>
                                 </h3>
 
-                                <p class="product-vendor">
-                                    <i class="fa-solid fa-store"></i>
+                               <p class="product-vendor">
+    <i class="fa-solid fa-store"></i>
 
-                                    <?= htmlspecialchars(
-                                        $product['store_name']
-                                        ?: $product['vendor_name']
-                                        ?: 'Vendor'
-                                    ) ?>
-                                </p>
+    <?php if (!empty($product['store_slug'])): ?>
+
+        <a
+            href="vendor-store.php?store=<?= urlencode($product['store_slug']) ?>"
+            class="product-store-link">
+
+            <?= htmlspecialchars(
+                $product['store_name']
+                ?: $product['vendor_name']
+                ?: 'View Store'
+            ) ?>
+
+        </a>
+
+    <?php else: ?>
+
+        <?= htmlspecialchars(
+            $product['store_name']
+            ?: $product['vendor_name']
+            ?: 'Vendor'
+        ) ?>
+
+    <?php endif; ?>
+</p>
 
                                 <p class="product-description">
                                     <?= htmlspecialchars(

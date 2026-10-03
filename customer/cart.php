@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Product no longer exists.";
                 $message_type = "error";
 
-            } elseif ($product['status'] !== 'active') {
+            } elseif ($product['status'] !== 'approved') {
 
                 unset($_SESSION['cart'][$product_id]);
 
@@ -214,7 +214,7 @@ foreach ($_SESSION['cart'] as $product_id => $cart_item) {
     */
 
     if (
-        $product['status'] !== 'active' ||
+        $product['status'] !== 'approved' ||
         (int)$product['stock'] <= 0
     ) {
 

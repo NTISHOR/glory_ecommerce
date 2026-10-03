@@ -74,8 +74,8 @@ $stmt = $pdo->prepare("
     LEFT JOIN vendor_profiles vp
         ON vp.user_id = p.vendor_id
 
-    WHERE p.id = ?
-      AND p.status = 'active'
+   WHERE p.id = ?
+  AND p.status = 'approved'
 ");
 
 $stmt->execute([$product_id]);
@@ -265,7 +265,7 @@ if (!empty($product['image'])) {
 
 <body>
 
-<div class="customer-wrapper">
+<div class="customer-dashboard">
 
     <!-- =========================================================
          SIDEBAR

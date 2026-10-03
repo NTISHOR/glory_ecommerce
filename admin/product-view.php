@@ -151,6 +151,11 @@ if (!$product) {
                 <span>Products</span>
             </a>
 
+            <a href="product-change-requests.php">
+    <i class="fas fa-file-pen"></i>
+    <span>Product Change Requests</span>
+</a>
+
             <a href="categories.php">
                 <i class="fas fa-list"></i>
                 <span>Categories</span>

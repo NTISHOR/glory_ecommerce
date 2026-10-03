@@ -2,8 +2,14 @@
 session_start();
 
 require_once '../config/db.php';
+require_once 'admin_activity.php';
 
 $pdo = getDbConnection();
+
+// Generate CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 
 // Restrict access to Super Admin
 if (
@@ -17,9 +23,156 @@ if (
 
 $full_name = $_SESSION['full_name'] ?? 'Super Admin';
 
+// Payment update messages
+$success_message = '';
+$error_message = '';
+
+// Handle payment status updates
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    // Validate CSRF token
+    if (
+        empty($_POST['csrf_token']) ||
+        !hash_equals(
+            $_SESSION['csrf_token'],
+            $_POST['csrf_token']
+        )
+    ) {
+        die('Invalid security token. Please refresh the page and try again.');
+    }
+
+    $order_id = filter_input(
+        INPUT_POST,
+        'order_id',
+        FILTER_VALIDATE_INT
+    );
+
+    $new_payment_status = $_POST['payment_status'] ?? '';
+
+    $refund_reason = trim($_POST['refund_reason'] ?? '');
+
+    // Only allow these payment updates from this page
+    $allowed_payment_updates = ['paid', 'failed', 'refunded'];
+
+if (
+    !$order_id ||
+    $order_id <= 0 ||
+    !in_array($new_payment_status, $allowed_payment_updates, true)
+) {
+    $error_message = "Invalid payment update.";
+
+} elseif (
+    $new_payment_status === 'refunded' &&
+    $refund_reason === ''
+) {
+    $error_message = "A refund reason is required.";
+} else {
+
+        try {
+
+            // Fetch current payment status
+            $stmt = $pdo->prepare("
+                SELECT payment_status, order_number
+                FROM orders
+                WHERE id = ?
+                LIMIT 1
+            ");
+
+            $stmt->execute([$order_id]);
+
+            $payment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$payment) {
+
+                $error_message = "Order not found.";
+
+            } elseif (
+                $payment['payment_status'] === 'refunded'
+            ) {
+
+                $error_message = "Refunded payments cannot be changed here.";
+
+            } elseif (
+                $payment['payment_status'] === $new_payment_status
+            ) {
+
+                $error_message = "Payment already has this status.";
+
+            } else {
+
+                $old_status = $payment['payment_status'];
+
+                // Update payment status
+               if ($new_payment_status === 'refunded') {
+
+    $stmt = $pdo->prepare("
+        UPDATE orders
+        SET
+            payment_status = 'refunded',
+            refunded_by = ?,
+            refunded_at = NOW(),
+            refund_reason = ?
+        WHERE id = ?
+    ");
+
+    $stmt->execute([
+        (int) $_SESSION['user_id'],
+        $refund_reason,
+        $order_id
+    ]);
+
+} else {
+
+    $stmt = $pdo->prepare("
+        UPDATE orders
+        SET
+            payment_status = ?,
+            payment_verified_by = ?,
+            payment_verified_at = NOW()
+        WHERE id = ?
+    ");
+
+    $stmt->execute([
+        $new_payment_status,
+        (int) $_SESSION['user_id'],
+        $order_id
+    ]);
+}
+
+                // Record admin activity
+                logAdminActivity(
+                    $pdo,
+                    (int) $_SESSION['user_id'],
+                    'UPDATE_PAYMENT_STATUS',
+                    "Payment for order {$payment['order_number']} changed from {$old_status} to {$new_payment_status}."
+                );
+
+                $success_message = "Payment status updated successfully.";
+            }
+
+        } catch (PDOException $e) {
+
+            $error_message = "Unable to update payment status. Please try again.";
+
+        }
+    }
+}
+
 // Search and filter values
 $search = trim($_GET['search'] ?? '');
 $payment_status = $_GET['payment_status'] ?? '';
+
+$payment_method = $_GET['payment_method'] ?? '';
+
+$allowed_methods = [
+    'pay_on_delivery',
+    'bank_transfer',
+    'card'
+];
+
+if (!in_array($payment_method, $allowed_methods, true)) {
+    $payment_method = '';
+}
 
 $allowed_statuses = [
     'pending',
@@ -57,6 +210,11 @@ if ($payment_status !== '') {
     $params[] = $payment_status;
 }
 
+if ($payment_method !== '') {
+    $where[] = "o.payment_method = ?";
+    $params[] = $payment_method;
+}
+
 $where_sql = !empty($where)
     ? "WHERE " . implode(" AND ", $where)
     : "";
@@ -67,9 +225,10 @@ $sql = "
         o.id,
         o.order_number,
         o.total_amount,
-        o.payment_status,
-        o.order_status,
-        o.created_at,
+o.payment_method,
+o.payment_status,
+o.order_status,
+o.created_at,
         u.full_name AS customer_name,
         u.email AS customer_email
     FROM orders o
@@ -292,6 +451,17 @@ function formatPaymentStatus($status)
 
         </section>
 
+<?php if ($success_message !== ''): ?>
+    <div class="success-message">
+        <?= htmlspecialchars($success_message) ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($error_message !== ''): ?>
+    <div class="error-message">
+        <?= htmlspecialchars($error_message) ?>
+    </div>
+<?php endif; ?>
 
         <!-- PAYMENT RECORDS -->
         <section class="table-panel">
@@ -344,6 +514,27 @@ function formatPaymentStatus($status)
                     </select>
                 </div>
 
+                <div class="filter-group">
+    <label for="payment_method">Payment Method</label>
+
+    <select name="payment_method" id="payment_method">
+
+        <option value="">All Payment Methods</option>
+
+        <?php foreach ($allowed_methods as $method): ?>
+
+            <option
+                value="<?= htmlspecialchars($method) ?>"
+                <?= $payment_method === $method ? 'selected' : '' ?>
+            >
+                <?= htmlspecialchars(formatPaymentStatus($method)) ?>
+            </option>
+
+        <?php endforeach; ?>
+
+    </select>
+</div>
+
 
                 <div class="filter-actions">
                     <button type="submit" class="primary-btn">
@@ -370,7 +561,8 @@ function formatPaymentStatus($status)
                             <th>Order Number</th>
                             <th>Customer</th>
                             <th>Amount</th>
-                            <th>Payment Status</th>
+<th>Payment Method</th>
+<th>Payment Status</th>
                             <th>Order Status</th>
                             <th>Date</th>
                             <th>Action</th>
@@ -407,31 +599,160 @@ function formatPaymentStatus($status)
                                     <?= formatPaymentAmount($payment['total_amount']) ?>
                                 </td>
 
-                                <td>
-                                    <span class="status-badge status-<?= htmlspecialchars($payment['payment_status'] ?? 'pending') ?>">
-                                        <?= htmlspecialchars(formatPaymentStatus($payment['payment_status'])) ?>
-                                    </span>
-                                </td>
+<td>
+    <span class="status-badge">
+        <?= htmlspecialchars(
+            formatPaymentStatus($payment['payment_method'])
+        ) ?>
+    </span>
+</td>
 
-                                <td>
-                                    <span class="status-badge status-<?= htmlspecialchars($payment['order_status'] ?? 'pending') ?>">
-                                        <?= htmlspecialchars(formatPaymentStatus($payment['order_status'])) ?>
-                                    </span>
-                                </td>
+<td>
+    <span class="status-badge status-<?= htmlspecialchars($payment['payment_status'] ?? 'pending') ?>">
+        <?= htmlspecialchars(
+            formatPaymentStatus($payment['payment_status'])
+        ) ?>
+    </span>
+</td>
+
+<td>
+    <span class="status-badge status-<?= htmlspecialchars($payment['order_status'] ?? 'pending') ?>">
+        <?= htmlspecialchars(
+            formatPaymentStatus($payment['order_status'])
+        ) ?>
+    </span>
+</td>
 
                                 <td>
                                     <?= date('d M Y, h:i A', strtotime($payment['created_at'])) ?>
                                 </td>
 
-                                <td>
-                                    <a
-                                        href="order-view.php?id=<?= (int) $payment['id'] ?>"
-                                        class="view-btn"
-                                    >
-                                        <i class="fa-solid fa-eye"></i>
-                                        View Order
-                                    </a>
-                                </td>
+                               <td>
+
+    <a
+        href="order-view.php?id=<?= (int) $payment['id'] ?>"
+        class="view-btn"
+    >
+        <i class="fa-solid fa-eye"></i>
+        View Order
+    </a>
+
+    <?php if ($payment['payment_status'] === 'pending'): ?>
+
+    <!-- Mark as Paid -->
+
+    <form method="POST" style="margin-top: 8px;">
+
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>"
+        >
+
+        <input
+            type="hidden"
+            name="order_id"
+            value="<?= (int) $payment['id'] ?>"
+        >
+
+        <input
+            type="hidden"
+            name="payment_status"
+            value="paid"
+        >
+
+        <button
+            type="submit"
+            class="primary-btn"
+            onclick="return confirm('Have you verified that this payment was received?');"
+        >
+            <i class="fa-solid fa-check"></i>
+            Mark as Paid
+        </button>
+
+    </form>
+
+
+    <!-- Mark as Failed -->
+
+    <form method="POST" style="margin-top: 8px;">
+
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>"
+        >
+
+        <input
+            type="hidden"
+            name="order_id"
+            value="<?= (int) $payment['id'] ?>"
+        >
+
+        <input
+            type="hidden"
+            name="payment_status"
+            value="failed"
+        >
+
+        <button
+            type="submit"
+            class="secondary-btn"
+            onclick="return confirm('Are you sure you want to mark this payment as failed?');"
+        >
+            <i class="fa-solid fa-xmark"></i>
+            Mark as Failed
+        </button>
+
+    </form>
+
+
+<?php elseif ($payment['payment_status'] === 'paid'): ?>
+
+    <!-- Refund Payment -->
+
+    <form method="POST" style="margin-top: 8px;">
+
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>"
+        >
+
+        <input
+            type="hidden"
+            name="order_id"
+            value="<?= (int) $payment['id'] ?>"
+        >
+
+        <input
+            type="hidden"
+            name="payment_status"
+            value="refunded"
+        >
+
+        <input
+            type="text"
+            name="refund_reason"
+            placeholder="Refund reason"
+            required
+            style="width: 100%; margin-bottom: 8px;"
+        >
+
+        <button
+            type="submit"
+            class="secondary-btn"
+            onclick="return confirm('Are you sure you want to refund this payment?');"
+        >
+            <i class="fa-solid fa-rotate-left"></i>
+            Refund Payment
+        </button>
+
+    </form>
+
+<?php endif; ?>
+
+</td>
 
                             </tr>
 
@@ -440,7 +761,7 @@ function formatPaymentStatus($status)
                     <?php else: ?>
 
                         <tr>
-                            <td colspan="8" class="empty-state">
+                            <td colspan="9" class="empty-state">
                                 No payment records found.
                             </td>
                         </tr>
